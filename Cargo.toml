@@ -1,0 +1,4 @@
+[workspace]
+members = ["kv-client", "kv-node", "kv-types"]
+
+resolver = "2"
