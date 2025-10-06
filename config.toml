@@ -1,0 +1,3 @@
+node_id = "node-1"
+listen_address = "localhost:8080"
+peers = []
