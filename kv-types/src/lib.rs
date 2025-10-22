@@ -1,14 +1,14 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+pub mod aw_set;
+pub mod lww_set;
+pub mod pn_counter;
+
+pub trait Merge {
+    fn merge(&mut self, other: &mut Self);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+//this enum is the value, so mergeDB really would be storing key : CrdtValue
+pub enum CrdtValue {
+    Counter(pn_counter::PNCounter),
+    Register(lww_set::LwwSet),
+    Set(aw_set::AWSet<String>), //for now its String
 }
