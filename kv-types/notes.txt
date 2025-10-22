@@ -3,3 +3,4 @@ LWWReg: Last Writer Wins register, for document type data
 PNCounter: Positive Negative counter, for shared counter
 AWSet: Add Wins set, for adding or removing tags, like a todo list
 
+getting the state CRDTs done for now, would like to do operational CRDTs soon
