@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package communication;
+
+service ReplicationService {
+    rpc propagate_data (SetvalueMessage) returns (ResponseMessage);
+}
+
+message SetvalueMessage {
+    string key = 1;
+    bytes value = 2;
+}
+
+message ResponseMessage {
+    bool success = 1;
+}

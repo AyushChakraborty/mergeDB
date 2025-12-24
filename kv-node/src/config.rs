@@ -4,9 +4,9 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
-    node_id: String,
-    listen_address: String,
-    peers: Vec<String>,
+    pub node_id: String,
+    pub listen_address: String,
+    pub peers: Vec<String>,
 }
 
 impl Config {
