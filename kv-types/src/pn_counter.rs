@@ -20,13 +20,14 @@ impl PNCounter {
     }
     
     fn increment(&mut self) {
-        self.p += 1;
+        self.p += 1; 
     }
     
     fn decrement(&mut self) {
         self.n += 1
     }
     
+    //for the user of the node to see the value of the counter
     fn value(&self) -> u64{
         self.p - self.n
     }
@@ -59,6 +60,20 @@ mod tests {
         replica_a.merge(&mut replica_b);
         
         assert_eq!(replica_a.value(), 3);      //as it should get b's value now
+
+        let mut replica_c = PNCounter::new(0, 0);
+        replica_c.increment();
+        replica_c.increment();
+        replica_c.decrement();
+
+        let mut replica_d = PNCounter::new(0, 0);
+        replica_d.increment();
+        replica_d.increment();
+        replica_d.increment();
+
+        replica_c.merge(&mut replica_d);
+        assert_eq!(replica_c.value(), 4);
+
     }
     
     #[test]
