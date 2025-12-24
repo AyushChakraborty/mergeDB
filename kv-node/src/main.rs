@@ -1,15 +1,25 @@
-use std::{path::Path};
-use kv_node::config::Config;
+use std::{path::Path, sync::Arc};
+use dashmap::DashMap;
+use kv_node::{config::Config, network::ReplicationServer};
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = "config.toml".to_string();
     let file_path = Path::new(&path);
-    match Config::load_config(file_path.to_path_buf()) {
-        Ok(c) => {
-        println!("{:?}", c);
-        },
+    let config = match Config::load_config(file_path.to_path_buf()) {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {e}");
+            return Ok(());
         }
-    }
+    };
+
+    let map = Arc::new(DashMap::new());
+    let server = ReplicationServer {
+        change: map,
+    };
+
+    server.start_listener(config).await?;
+
+    Ok(())
 }
