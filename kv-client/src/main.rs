@@ -1,5 +1,5 @@
 use communication::replication_service_client::ReplicationServiceClient;
-use communication::SetvalueMessage;
+use communication::PropagateDataRequest;
 use tonic::Request;
 
 pub mod communication {
@@ -12,17 +12,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Connected to the server!");
 
+    //assuming the case: CSET test_key 1   is sent to the node
+    let value_type = String::from("CSET");
     let key = "test_key".to_string();
-    let value = serde_json::json!({
-        "name": "mergeDB",
-        "status": "Running",
-    });
+    let value: u64 = 1;
 
-    let value_bytes = serde_json::to_vec(&value)?;
-
-    let request = Request::new(SetvalueMessage {
+    let request = Request::new(PropagateDataRequest {
+        valuetype: value_type.clone(),
         key: key.clone(),
-        value: value_bytes,
+        value: value.to_be_bytes().to_vec(),
     });
 
     let response = client.propagate_data(request).await?;
