@@ -2,15 +2,32 @@ syntax = "proto3";
 
 package communication;
 
-service ReplicationService {
-    rpc propagate_data (SetvalueMessage) returns (ResponseMessage);
+service ReplicationService { 
+  rpc PropagateData(PropagateDataRequest) returns (PropagateDataResponse);
+
+  rpc GossipChanges(GossipChangesRequest) returns (GossipChangesResponse);
 }
 
-message SetvalueMessage {
-    string key = 1;
-    bytes value = 2;
+message PropagateDataRequest {
+  string valuetype = 1;
+  string key = 2;
+  bytes value = 3;
 }
 
-message ResponseMessage {
-    bool success = 1;
+message PropagateDataResponse {
+  bool success = 1;
+}
+
+message PNCounterMessage {
+  map<string, uint64> p = 1;
+  map<string, uint64> n= 2;
+}
+
+message GossipChangesRequest {
+  string key = 1;
+  PNCounterMessage counter = 2;
+}
+
+message GossipChangesResponse {
+  bool success = 1;
 }

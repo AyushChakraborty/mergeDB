@@ -4,6 +4,7 @@ use std::{
     hash::Hash,
 };
 
+#[derive(Debug)]
 pub struct AWSet<T>
 where
     T: Eq + Hash + Clone,
