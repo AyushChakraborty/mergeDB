@@ -1,11 +1,12 @@
 use dashmap::DashMap;
 use kv_types::Merge;
 use kv_types::{aw_set::AWSet, pn_counter::PNCounter};
+use rand::seq::IndexedRandom;
 use std::collections::HashMap;
-use std::{net::SocketAddr, sync::Arc};
-use tonic::{transport::Server, Response};
+use std::{net::SocketAddr, sync::{Arc, RwLock}};
+use tonic::{transport::{Server}, Request, Response};
 
-use crate::communication::{GossipChangesRequest, GossipChangesResponse, PnCounterMessage};
+use crate::communication::{GossipChangesRequest, GossipChangesResponse, PnCounterMessage, replication_service_client::ReplicationServiceClient};
 use crate::{
     communication::{
         replication_service_server::ReplicationService,
@@ -14,6 +15,8 @@ use crate::{
     },
     config::Config,
 };
+
+const K: usize = 3;
 
 #[derive(Debug)]
 pub enum CRDTValue {
@@ -25,6 +28,7 @@ pub enum CRDTValue {
 pub struct ReplicationServer {
     pub store: Arc<DashMap<String, CRDTValue>>,
     pub node_id: String,
+    pub peers: Arc<RwLock<Vec<String>>>,
 }
 
 // convert domain -> proto for sending
@@ -116,6 +120,55 @@ impl ReplicationServer {
             .add_service(ReplicationServiceServer::new(self.clone()))
             .serve(addr)
             .await?;
+
+        Ok(())
+    }
+
+    pub async fn push(&self, key: String, value: CRDTValue) -> Result<(), Box<dyn std::error::Error>> {
+        //send updates to k randomly chosen peers
+        //first make sure to preconnect to 3 randomly chosen peer nodes
+        //lots of things to think of, like what if a node goes down, how will this node reconnect to
+        //some other node etc, will tackle these later
+
+        let mut rng = rand::rng();
+
+        //a connection pool of rpc connections so as to not cause redundant ::connect's again if
+        //a node has already been connected to in an earlier iteration
+        // let mut connection_pool: HashMap<String, ReplicationServiceClient<Channel>> = HashMap::new();
+
+        let chosen_peers: Vec<String> = {
+            let peer_guard = self.peers.read().expect("RwLock poisoned");
+            peer_guard
+            .choose_multiple(&mut rng, K)
+            .cloned()
+            .collect()
+        };
+
+        for peer_addr in chosen_peers.iter() {
+            match ReplicationServiceClient::connect((*peer_addr).clone()).await {
+                Ok(mut peer_client) => {
+                    match &value {
+                        CRDTValue::Counter(inner) => {
+                            let state = Request::new(GossipChangesRequest {
+                                key: key.clone(),
+                                counter: Some(PnCounterMessage::from(inner.clone())),
+                            });
+                            
+                            println!("connected to the peer with id: {}", peer_addr);
+                            match peer_client.gossip_changes(state).await {
+                                Ok(response) => println!("Response from peer: {:?}", response.into_inner()),
+                                Err(e) => println!("failed to send update to {}: {}", peer_addr, e),
+                            }
+                        }
+                        _ => print!("other types soon!"),
+                    }
+                }
+                Err(e) => {
+                    println!("failed to connect to {}: {}", peer_addr, e);
+                    continue;
+                }
+            }
+        }
 
         Ok(())
     }
