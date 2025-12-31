@@ -1,22 +1,26 @@
 use dashmap::DashMap;
-use kv_types::Merge;
-use kv_types::{aw_set::AWSet, pn_counter::PNCounter};
+use kv_types::{aw_set::AWSet, pn_counter::PNCounter, Merge};
 use rand::seq::IndexedRandom;
-use std::collections::HashMap;
-use std::{net::SocketAddr, sync::{Arc, RwLock}};
-use tonic::{transport::{Server}, Request, Response};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
+use tonic::{transport::Channel, transport::Server, Request, Response};
 
-use crate::communication::{GossipChangesRequest, GossipChangesResponse, PnCounterMessage, replication_service_client::ReplicationServiceClient};
 use crate::{
     communication::{
-        replication_service_server::ReplicationService,
-        replication_service_server::ReplicationServiceServer, PropagateDataRequest,
-        PropagateDataResponse,
+        replication_service_client::ReplicationServiceClient,
+        replication_service_server::{ReplicationService, ReplicationServiceServer},
+        GossipBatchRequest, GossipBatchResponse, GossipChangesRequest, GossipChangesResponse,
+        PnCounterMessage, PropagateDataRequest, PropagateDataResponse,
     },
     config::Config,
 };
 
 const K: usize = 3;
+const BATCH_SIZE: usize = 1000;
 
 #[derive(Debug)]
 pub enum CRDTValue {
@@ -24,11 +28,17 @@ pub enum CRDTValue {
     ASet(AWSet<String>),
 }
 
+#[derive(Debug)]
+pub struct StoredValue {
+    pub data: CRDTValue,
+    pub last_updated: SystemTime,
+}
+
 #[derive(Debug, Clone)]
 pub struct ReplicationServer {
-    pub store: Arc<DashMap<String, CRDTValue>>,
+    pub store: Arc<DashMap<String, StoredValue>>,
     pub node_id: String,
-    pub peers: Arc<RwLock<Vec<String>>>,
+    pub peers: Arc<DashMap<String, SystemTime>>,
 }
 
 // convert domain -> proto for sending
@@ -78,7 +88,13 @@ impl ReplicationService for ReplicationServer {
                 p: HashMap::from([(self.node_id.clone(), numeric_val)]),
                 n: HashMap::from([(self.node_id.clone(), 0)]),
             });
-            map.insert(key, new_pn);
+            map.insert(
+                key,
+                StoredValue {
+                    data: new_pn,
+                    last_updated: SystemTime::now(),
+                },
+            );
         } else {
             println!("other types soon!");
         }
@@ -99,17 +115,54 @@ impl ReplicationService for ReplicationServer {
         self.store
             .entry(key)
             .and_modify(|current_value| {
-                match current_value {
+                match &mut current_value.data {
                     CRDTValue::Counter(local_counter) => {
                         local_counter.merge(&mut remote_counter.clone());
                         println!("merged from remote node");
                     } //other types later
                     _ => println!("type mismatch: key exisits, but value is not of type PNCounter"),
                 }
+
+                current_value.last_updated = SystemTime::now()
             })
-            .or_insert_with(|| CRDTValue::Counter(remote_counter));
+            .or_insert_with(|| StoredValue {
+                data: CRDTValue::Counter(remote_counter),
+                last_updated: SystemTime::now(),
+            });
 
         Ok(Response::new(GossipChangesResponse { success: true }))
+    }
+
+    async fn gossip_batch(
+        &self,
+        batch: tonic::Request<GossipBatchRequest>,
+    ) -> Result<tonic::Response<GossipBatchResponse>, tonic::Status> {
+        let batch = batch.into_inner().batch;
+        for (key, counter) in batch {
+            let remote_counter = PNCounter::from(counter);
+
+            self.store
+                .entry(key)
+                .and_modify(|current_value| {
+                    match &mut current_value.data {
+                        CRDTValue::Counter(local_counter) => {
+                            local_counter.merge(&mut remote_counter.clone());
+                            println!("merged from remote node");
+                        } //other types later
+                        _ => println!(
+                            "type mismatch: key exisits, but value is not of type PNCounter"
+                        ),
+                    }
+
+                    current_value.last_updated = SystemTime::now()
+                })
+                .or_insert_with(|| StoredValue {
+                    data: CRDTValue::Counter(remote_counter),
+                    last_updated: SystemTime::now(),
+                });
+        }
+
+        Ok(Response::new(GossipBatchResponse { success: (true) }))
     }
 }
 
@@ -124,7 +177,11 @@ impl ReplicationServer {
         Ok(())
     }
 
-    pub async fn push(&self, key: String, value: CRDTValue) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn push(
+        &self,
+        key: String,
+        value: CRDTValue,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         //send updates to k randomly chosen peers
         //first make sure to preconnect to 3 randomly chosen peer nodes
         //lots of things to think of, like what if a node goes down, how will this node reconnect to
@@ -132,42 +189,123 @@ impl ReplicationServer {
 
         let mut rng = rand::rng();
 
-        //a connection pool of rpc connections so as to not cause redundant ::connect's again if
-        //a node has already been connected to in an earlier iteration
-        // let mut connection_pool: HashMap<String, ReplicationServiceClient<Channel>> = HashMap::new();
-
         let chosen_peers: Vec<String> = {
-            let peer_guard = self.peers.read().expect("RwLock poisoned");
-            peer_guard
-            .choose_multiple(&mut rng, K)
-            .cloned()
-            .collect()
+            let peers: Vec<String> = self.peers.iter().map(|entry| entry.key().clone()).collect();
+            peers.choose_multiple(&mut rng, K).cloned().collect()
         };
 
         for peer_addr in chosen_peers.iter() {
             match ReplicationServiceClient::connect((*peer_addr).clone()).await {
-                Ok(mut peer_client) => {
-                    match &value {
-                        CRDTValue::Counter(inner) => {
-                            let state = Request::new(GossipChangesRequest {
-                                key: key.clone(),
-                                counter: Some(PnCounterMessage::from(inner.clone())),
-                            });
-                            
-                            println!("connected to the peer with id: {}", peer_addr);
-                            match peer_client.gossip_changes(state).await {
-                                Ok(response) => println!("Response from peer: {:?}", response.into_inner()),
-                                Err(e) => println!("failed to send update to {}: {}", peer_addr, e),
+                Ok(mut peer_client) => match &value {
+                    CRDTValue::Counter(inner) => {
+                        let state = Request::new(GossipChangesRequest {
+                            key: key.clone(),
+                            counter: Some(PnCounterMessage::from(inner.clone())),
+                        });
+
+                        println!("connected to the peer with id: {}", peer_addr);
+                        match peer_client.gossip_changes(state).await {
+                            Ok(response) => {
+                                println!("Response from peer: {:?}", response.into_inner())
                             }
+                            Err(e) => println!("failed to send update to {}: {}", peer_addr, e),
                         }
-                        _ => print!("other types soon!"),
                     }
-                }
+                    _ => print!("other types soon!"),
+                },
                 Err(e) => {
                     println!("failed to connect to {}: {}", peer_addr, e);
                     continue;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    pub async fn create_bacth(&self) -> Result<(), Box<dyn std::error::Error>> {
+
+        //a connection pool of rpc connections so as to not cause redundant ::connect's again if
+        //a node has already been connected to in an earlier iteration
+
+        let mut connection_pool: HashMap<String, ReplicationServiceClient<Channel>> =
+            HashMap::new();
+
+        loop {
+            let mut chosen_peers: Vec<String> = Vec::new();
+            for peers in self.peers.iter() {
+                if peers.value().elapsed().unwrap_or(Duration::ZERO) > Duration::from_secs(2) {
+                    chosen_peers.push(peers.key().clone());
+                }
+            }
+
+            for peer_addr in &chosen_peers {
+                if !connection_pool.contains_key(peer_addr) {
+                    let endpoint = if peer_addr.starts_with("http") {
+                        peer_addr.clone()
+                    } else {
+                        format!("http://{}", peer_addr)
+                    };
+
+                    match ReplicationServiceClient::connect(endpoint).await {
+                        Ok(client) => {
+                            connection_pool.insert(peer_addr.clone(), client);
+                        }
+                        Err(e) => {
+                            println!("failed to connect to {}: {}", peer_addr, e);
+                            continue;
+                        }
+                    }
+                }
+
+                //for each key in the current node, transfer each of the node states for merge
+                if let Some(peer_client) = connection_pool.get_mut(peer_addr) {
+                    let mut batch = HashMap::new();
+                    let mut updates_sent = 0;
+
+                    for key_val in self.store.iter() {
+                        let key = key_val.key();
+                        let value = key_val.value();
+
+                        if value.last_updated.elapsed().unwrap_or(Duration::ZERO) < Duration::from_secs(2) {
+                            if let CRDTValue::Counter(inner) = &value.data {
+                                batch.insert(key.clone(), PnCounterMessage::from(inner.clone()));
+                            }
+
+                            if batch.len() >= BATCH_SIZE {
+                                let req = Request::new(GossipBatchRequest {
+                                    batch: batch.clone(),
+                                });
+                                if let Err(e) = peer_client.gossip_batch(req).await {
+                                    eprintln!("Failed to send batch to {}: {}", peer_addr, e);
+                                } else {
+                                    updates_sent += batch.len();
+                                }
+                                batch.clear();
+                            }
+                        }
+                    }
+
+                    if !batch.is_empty() {
+                        let req = Request::new(GossipBatchRequest {
+                            batch: batch.clone(),
+                        });
+                        if let Err(e) = peer_client.gossip_batch(req).await {
+                            eprintln!("Failed to send final batch to {}: {}", peer_addr, e);
+                        } else {
+                            updates_sent += batch.len();
+                        }
+                    }
+
+                    self.peers.insert(peer_addr.clone(), SystemTime::now());
+
+                    if updates_sent > 0 {
+                        println!("Synced {} items with {}", updates_sent, peer_addr);
+                    }
+                }
+            }
+            //wait for 2s before the next gossip round
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
 
         Ok(())

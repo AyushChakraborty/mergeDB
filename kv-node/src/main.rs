@@ -1,9 +1,6 @@
 use dashmap::DashMap;
-use kv_node::{
-    config::Config,
-    network::{ReplicationServer},
-};
-use std::{path::Path, sync::{Arc, RwLock}};
+use kv_node::{config::Config, network::ReplicationServer};
+use std::{path::Path, sync::Arc, time::SystemTime};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,9 +15,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let map = Arc::new(DashMap::new());
-    let peers = Arc::new(RwLock::new(config.peers.clone()));
+    let peers = Arc::new(DashMap::new());
+    for peer_addr in &config.peers {
+        peers.insert(peer_addr.clone(), SystemTime::UNIX_EPOCH);
+    }
+
     let node_id = config.node_id.clone();
-    // let node_addr = config.listen_address.clone();
     let server = ReplicationServer {
         store: map.clone(),
         node_id: node_id,
