@@ -6,6 +6,8 @@ service ReplicationService {
   rpc PropagateData(PropagateDataRequest) returns (PropagateDataResponse);
 
   rpc GossipChanges(GossipChangesRequest) returns (GossipChangesResponse);
+
+  rpc GossipBatch(GossipBatchRequest) returns (GossipBatchResponse);
 }
 
 message PropagateDataRequest {
@@ -25,9 +27,19 @@ message PNCounterMessage {
 
 message GossipChangesRequest {
   string key = 1;
+
+  // We should use an enum representing the CRDTs instead of directly specifying them directly
   PNCounterMessage counter = 2;
 }
 
 message GossipChangesResponse {
+  bool success = 1;
+}
+
+message GossipBatchRequest {
+  map<string, PNCounterMessage> batch = 1;
+}
+
+message GossipBatchResponse {
   bool success = 1;
 }
