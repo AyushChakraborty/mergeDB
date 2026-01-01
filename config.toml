@@ -1,5 +1,5 @@
 node_id = "node_1"
-listen_address = "127.0.0.1:8080"
-peers = ["127.0.0.1:8081", "127.0.0.1:8082", "127.0.0.1:8083", "127.0.0.1:8084"]    #peer addr goes in here
+listen_address = "127.0.0.1:8000"
+peers = ["127.0.0.1:8001", "127.0.0.1:8002", "127.0.0.1:8003", "127.0.0.1:8004"]    #peer addr goes in here
 
 #hardcoded for now

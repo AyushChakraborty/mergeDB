@@ -8,7 +8,7 @@ pub mod communication {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = ReplicationServiceClient::connect("http://127.0.0.1:8080").await?;
+    let mut client = ReplicationServiceClient::connect("http://127.0.0.1:8000").await?;
 
     println!("Connected to the server!");
 

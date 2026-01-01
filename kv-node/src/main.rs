@@ -1,17 +1,30 @@
 use dashmap::DashMap;
 use kv_node::{config::Config, network::ReplicationServer};
-use std::{path::Path, sync::Arc, time::SystemTime};
+use std::{env, net::SocketAddr, path::Path, sync::Arc, time::SystemTime};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = "../config.toml".to_string();
-    let file_path = Path::new(&path);
-    let config = match Config::load_config(file_path.to_path_buf()) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            return Ok(());
+    let args: Vec<String> = env::args().collect();
+
+    let config = if args.contains(&"--interactive".to_string()) || args.contains(&"--i".to_string())
+    {
+        //for testing, allowing node_addr, peers, id to be entered by the node operator
+        println!("@@Interative Mode@@");
+        get_interactive_cofig()?
+    } else if args.len() > 1 {
+        let path = Path::new(&args[1]);
+        match Config::load_config(path.to_path_buf()) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                return Ok(());
+            }
         }
+    } else {
+        eprintln!("usage: ");
+        eprintln!("   file mode: ./kv-node <path_to_config>.toml");
+        eprintln!("   interactive mode: ./kv-node --interactive");
+        return Ok(());
     };
 
     let map = Arc::new(DashMap::new());
@@ -20,13 +33,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         peers.insert(peer_addr.clone(), SystemTime::UNIX_EPOCH);
     }
 
-    let node_id = config.node_id.clone();
+    // let node_id = config.node_id.clone();
     let server = ReplicationServer {
         store: map.clone(),
-        node_id: node_id,
+        node_id: config.node_id.clone(),
         peers: peers,
     };
 
-    server.start_listener(config).await?;
+    println!("starting server on {}..", config.listen_address);
+
+    let server_clone = server.clone();
+    //listener runs in another thread
+    tokio::spawn(async move {
+        if let Err(e) = server_clone.start_listener(config).await {
+            eprintln!("server listener failed: {}", e);
+        }
+    });
+
+    //gossip loop runs here
+    server.create_and_gossip_batch().await?;
     Ok(())
+}
+
+fn get_interactive_cofig() -> Result<Config, Box<dyn std::error::Error>> {
+    let mut node_id = String::new();
+    println!("enter the node id for this node: ");
+    std::io::stdin()
+        .read_line(&mut node_id)
+        .expect("failed to read line, restart node again");
+    let node_id = node_id.trim().to_string();
+
+    let mut node_addr = String::new();
+    println!("enter node's address (egs: 127.0.0.1:8000): ");
+    std::io::stdin().read_line(&mut node_addr)?;
+    let node_addr = node_addr.trim().to_string();
+
+    if let Err(e) = node_addr.parse::<SocketAddr>() {
+        return Err(e.into()); //invalid IPv4 addr format
+    }
+
+    let mut num_peers = String::new();
+    println!("enter number of peers: ");
+    std::io::stdin()
+        .read_line(&mut num_peers)
+        .expect("failed to read line, restart node again");
+    let num_peers = num_peers.trim().parse::<i32>().unwrap();
+
+    let mut peers_config = Vec::new(); //for the Config struct
+
+    for i in 0..num_peers {
+        let mut peer_addr = String::new();
+        println!("enter the peer #{} addr (egs: 127.0.0.1:8000): ", i + 1);
+        std::io::stdin()
+            .read_line(&mut peer_addr)
+            .expect("failed to read line, restart node again");
+        let peer_addr = peer_addr.trim().to_string();
+
+        if let Err(e) = peer_addr.parse::<SocketAddr>() {
+            return Err(e.into());
+        }
+        peers_config.push(peer_addr);
+    }
+
+    Ok(Config {
+        node_id: node_id,
+        listen_address: node_addr,
+        peers: peers_config,
+    })
 }
