@@ -37,20 +37,20 @@ impl Merge for PNCounter {
 }
 
 impl PNCounter {
-    fn new(node_id: String, p: u64, n: u64) -> Self {
+    pub fn new(node_id: String, p: u64, n: u64) -> Self {
         PNCounter { p: HashMap::from([(node_id.clone(), p)]), n: HashMap::from([(node_id.clone(), n)]) }
     }
 
-    fn increment(&mut self, node_id: String) {
-        *self.p.entry(node_id).or_insert(0) += 1;
+    pub fn increment(&mut self, node_id: String, amt: u64) {
+        *self.p.entry(node_id).or_insert(0) += amt;
     }
 
-    fn decrement(&mut self, node_id: String) {
-        *self.n.entry(node_id).or_insert(0) += 1;
+    pub fn decrement(&mut self, node_id: String, amt: u64) {
+        *self.n.entry(node_id).or_insert(0) += amt;
     }
 
     //for the user of the node to see the value of the counter
-    fn value(&self) -> i64 {
+    pub fn value(&self) -> i64 {
         let p_sum: u64 = self.p.values().sum();
         let n_sum: u64 = self.n.values().sum();
         (p_sum as i64) - (n_sum as i64)
@@ -65,9 +65,9 @@ mod tests {
     fn test_local_increments_and_decremenets() {
         let node_id = String::from("node_1");
         let mut counter = PNCounter::new(node_id.clone(), 0, 0);
-        counter.increment(node_id.clone());
-        counter.increment(node_id.clone());
-        counter.decrement(node_id.clone());
+        counter.increment(node_id.clone(), 1);
+        counter.increment(node_id.clone(), 1);
+        counter.decrement(node_id.clone(), 1);
 
         assert_eq!(counter.value(), 1);
     }
@@ -76,11 +76,11 @@ mod tests {
     fn merge_maintains_total() {
         let node_id_a = String::from("node_1");
         let mut replica_a = PNCounter::new(node_id_a.clone(), 0, 0);
-        replica_a.increment(node_id_a.clone()); //becomes 1 now
+        replica_a.increment(node_id_a.clone(), 1); //becomes 1 now
 
         let node_id_b = String::from("node_2");
         let mut replica_b = PNCounter::new(node_id_b.clone(), 1, 0);
-        replica_b.increment(node_id_b.clone()); //becomes 2 now
+        replica_b.increment(node_id_b.clone(), 1); //becomes 2 now
 
         //merge b's state to a
         replica_a.merge(&mut replica_b);
@@ -89,15 +89,15 @@ mod tests {
 
         let node_id_c = String::from("node_3");
         let mut replica_c = PNCounter::new(node_id_c.clone(), 0, 0);
-        replica_c.increment(node_id_c.clone());
-        replica_c.increment(node_id_c.clone());
-        replica_c.decrement(node_id_c.clone());
+        replica_c.increment(node_id_c.clone(), 1);
+        replica_c.increment(node_id_c.clone(), 1);
+        replica_c.decrement(node_id_c.clone(), 1);
 
         let node_id_d = String::from("node_4");
         let mut replica_d = PNCounter::new(node_id_d.clone(), 0, 0);
-        replica_d.increment(node_id_d.clone());
-        replica_d.increment(node_id_d.clone());
-        replica_d.increment(node_id_d.clone());
+        replica_d.increment(node_id_d.clone(), 1);
+        replica_d.increment(node_id_d.clone(), 1);
+        replica_d.increment(node_id_d.clone(), 1);
 
         replica_c.merge(&mut replica_d);
         assert_eq!(replica_c.value(), 4);
@@ -107,11 +107,11 @@ mod tests {
     fn test_merge_is_commutative() {
         let node_id_a = String::from("node_1");
         let mut replica_a = PNCounter::new(node_id_a.clone(), 0, 0);
-        replica_a.increment(node_id_a.clone());
+        replica_a.increment(node_id_a.clone(), 1);
 
         let node_id_b = String::from("node_2");
         let mut replica_b = PNCounter::new(node_id_b.clone(), 1, 0);
-        replica_b.decrement(node_id_b.clone());
+        replica_b.decrement(node_id_b.clone(), 1);
 
         let mut a_then_b = replica_a.clone();
         a_then_b.merge(&mut replica_b);

@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use kv_node::{config::Config, network::ReplicationServer};
 use std::{env, net::SocketAddr, path::Path, sync::Arc, time::SystemTime};
+use std::io::Write;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = if args.contains(&"--interactive".to_string()) || args.contains(&"--i".to_string())
     {
         //for testing, allowing node_addr, peers, id to be entered by the node operator
-        println!("@@Interative Mode@@");
+        println!("@@Interative Mode@@");   
         get_interactive_cofig()?
     } else if args.len() > 1 {
         let path = Path::new(&args[1]);
@@ -57,14 +58,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn get_interactive_cofig() -> Result<Config, Box<dyn std::error::Error>> {
     let mut node_id = String::new();
-    println!("enter the node id for this node: ");
+    print!("enter the node id for this node: ");
+    std::io::stdout().flush().unwrap();
     std::io::stdin()
         .read_line(&mut node_id)
         .expect("failed to read line, restart node again");
     let node_id = node_id.trim().to_string();
 
     let mut node_addr = String::new();
-    println!("enter node's address (egs: 127.0.0.1:8000): ");
+    print!("enter node's address (egs: 127.0.0.1:8000): ");
+    std::io::stdout().flush().unwrap();
     std::io::stdin().read_line(&mut node_addr)?;
     let node_addr = node_addr.trim().to_string();
 
@@ -73,7 +76,8 @@ fn get_interactive_cofig() -> Result<Config, Box<dyn std::error::Error>> {
     }
 
     let mut num_peers = String::new();
-    println!("enter number of peers: ");
+    print!("enter number of peers: ");
+    std::io::stdout().flush().unwrap();
     std::io::stdin()
         .read_line(&mut num_peers)
         .expect("failed to read line, restart node again");
@@ -83,7 +87,8 @@ fn get_interactive_cofig() -> Result<Config, Box<dyn std::error::Error>> {
 
     for i in 0..num_peers {
         let mut peer_addr = String::new();
-        println!("enter the peer #{} addr (egs: 127.0.0.1:8000): ", i + 1);
+        print!("enter the peer #{} addr (egs: 127.0.0.1:8000): ", i + 1);
+        std::io::stdout().flush().unwrap();
         std::io::stdin()
             .read_line(&mut peer_addr)
             .expect("failed to read line, restart node again");

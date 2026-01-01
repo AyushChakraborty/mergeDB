@@ -94,11 +94,65 @@ impl ReplicationService for ReplicationServer {
                     last_updated: SystemTime::now(),
                 },
             );
+            println!("Counter set!");
+            //need to send an ack that the op has been done
+            Ok(Response::new(PropagateDataResponse { success: true, response: Vec::new() })) //send empty bytes for response
+        } else if value_type == "CINC" {
+            let bytes: [u8; 8] = raw_value_bytes.try_into().map_err(|_| {
+                tonic::Status::invalid_argument("invalid byte length for u64, expected 8 bytes")
+            })?;
+
+            let numeric_val: u64 = u64::from_be_bytes(bytes);
+
+            println!("received valid CINC, to increase by: {}", numeric_val);
+
+            let mut val = map.get_mut(&key).unwrap();
+            match &mut val.data {
+                CRDTValue::Counter(local_counter) => {
+                    local_counter.increment(self.node_id.clone(), numeric_val);
+                    println!("Counter incremented by: {}", numeric_val);
+                    return Ok(Response::new(PropagateDataResponse { success: true, response: Vec::new() }))
+                }
+                _ => println!("type mismatch: key exisits, but value is not of type PNCounter"),
+            }
+            Ok(Response::new(PropagateDataResponse { success: false, response: Vec::new() }))
+        } else if value_type == "CDEC" {
+            let bytes: [u8; 8] = raw_value_bytes.try_into().map_err(|_| {
+                tonic::Status::invalid_argument("invalid byte length for u64, expected 8 bytes")
+            })?;
+
+            let numeric_val: u64 = u64::from_be_bytes(bytes);
+
+            println!("received valid CDEC, to decrease by: {}", numeric_val);
+
+            let mut val = map.get_mut(&key).unwrap();
+            match &mut val.data {
+                CRDTValue::Counter(local_counter) => {
+                    local_counter.decrement(self.node_id.clone(), numeric_val);
+                    println!("Counter decremented by: {}", numeric_val);
+                    return Ok(Response::new(PropagateDataResponse { success: true, response: Vec::new() }))
+                }
+                _ => println!("type mismatch: key exisits, but value is not of type PNCounter"),
+            }
+            Ok(Response::new(PropagateDataResponse { success: false, response: Vec::new() }))
+        } else if value_type == "CGET" {
+            //no need to resolve raw_value_bytes here, "CGET key"
+            println!("received valid CGET, get value of key: {}", key);
+
+            let val = map.get(&key).unwrap();
+            match &val.data {
+                CRDTValue::Counter(local_counter) => {
+                    let value = local_counter.value();
+                    println!("value is {}", value);
+                    return Ok(Response::new(PropagateDataResponse { success: true, response: value.to_be_bytes().to_vec() }))
+                }
+                _ => println!("type mismatch: key exisits, but value is not of type PNCounter"),
+            }
+            Ok(Response::new(PropagateDataResponse { success: false, response: Vec::new() }))
         } else {
             println!("other types soon!");
+            Ok(Response::new(PropagateDataResponse { success: false, response: Vec::new() }))
         }
-
-        Ok(Response::new(PropagateDataResponse { success: true }))
     }
 
     async fn gossip_changes(

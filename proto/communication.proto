@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package communication;
 
-service ReplicationService { 
+service ReplicationService {
   rpc PropagateData(PropagateDataRequest) returns (PropagateDataResponse);
 
   rpc GossipChanges(GossipChangesRequest) returns (GossipChangesResponse);
@@ -18,11 +18,12 @@ message PropagateDataRequest {
 
 message PropagateDataResponse {
   bool success = 1;
+  bytes response = 2;
 }
 
 message PNCounterMessage {
   map<string, uint64> p = 1;
-  map<string, uint64> n= 2;
+  map<string, uint64> n = 2;
 }
 
 message GossipChangesRequest {
